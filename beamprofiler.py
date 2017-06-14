@@ -27,6 +27,7 @@ class MainWindow(QtGui.QMainWindow):
         win.resize(1000,600)
         self.setCentralWidget(win)
         imageview = win.addViewBox(row=0, col=0, lockAspect=True)
+        self.imageview = imageview
         self.create_camera_menu()
 
         # add image plot
@@ -37,9 +38,11 @@ class MainWindow(QtGui.QMainWindow):
         img.setImage(im_data)
         self.img = img
 
-        timer = QtCore.QTimer(parent=win)
-        timer.timeout.connect(self.updateImage)
-        timer.start(50)
+        acquisition_timer = QtCore.QTimer(parent=win)
+        self.acquisition_timer = acquisition_timer
+        self.acquisition_timer_interval = 50
+        acquisition_timer.timeout.connect(self.updateImage)
+        acquisition_timer.start(self.acquisition_timer_interval)
 
         # add a region of interest to the image
         roi = pg.RectROI([0, 0], [cols, rows], pen=qualitative_colors[0])
@@ -59,14 +62,45 @@ class MainWindow(QtGui.QMainWindow):
         rp_plot = win.addPlot(row=0, col=1)
         self.rp_curve = rp_plot.plot(x=rp, y=np.arange(rows),pen=qualitative_colors[1])
 
-        timer.timeout.connect(self.updateRowprofile)
+        acquisition_timer.timeout.connect(self.updateRowprofile)
 
         # add columnn profile
         cp = self.calculate_col_profile()
         cp_plot = win.addPlot(row=1, col=0)
         self.cp_curve = cp_plot.plot(y=cp, pen=qualitative_colors[1])
 
-        timer.timeout.connect(self.updateColprofile)
+        acquisition_timer.timeout.connect(self.updateColprofile)
+
+        # set state parameters
+        self.capturing = True
+
+        # add functional buttons
+        self._add_button_layout()
+        self._add_capture_toggle_button()
+        self._add_reset_roi_button()
+
+    def _add_button_layout(self):
+        self.layout = QtGui.QVBoxLayout(self)
+        self.layout.setSpacing(0)
+        self.layout.setMargin(20)
+        
+    def _add_capture_toggle_button(self):
+        self.button_toggle_capture = QtGui.QPushButton('Start/Stop', self)
+        self.button_toggle_capture.clicked.connect(self.toggle_capture)
+        #layout = QtGui.QHBoxLayout(self)
+        #layout.addWidget(self.button_toggle_capture)
+        #self.button_toggle_capture.setParent(self.win)
+        #self.button_toggle_capture.show()
+        self.layout.insertWidget(0, self.button_toggle_capture)
+
+    def _add_reset_roi_button(self):
+        self.button_reset_roi = QtGui.QPushButton('Reset ROI', self)
+        #self.button_reset_roi.setParent(self.win)
+        #self.button_reset_roi.show()
+        self.layout.insertWidget(1, self.button_reset_roi)
+        #TODO: This button is placed above the other button :(
+        # Further it should be connected to a method that resets the region of interest.
+
     
     def create_camera_menu(self):
         # add a menu bar to the window for advanced blackfly control
@@ -155,6 +189,15 @@ class MainWindow(QtGui.QMainWindow):
         cp = self.calculate_col_profile()
         self.cp_curve.setData(y=cp)
 
+    def toggle_capture(self):
+        #TODO: Write a method that toggles the capture and processing of images.
+        # Can this be done by disconnecting or stopping the main data acquisition timer?
+        if self.capturing:
+            self.acquisition_timer.stop()
+        else:
+            self.acquisition_timer.start(self.acquisition_timer_interval)
+
+        self.capturing = not self.capturing
 
 def main():
     app = QtGui.QApplication(sys.argv)
