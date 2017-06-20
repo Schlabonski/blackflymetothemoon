@@ -70,7 +70,6 @@ def gaussian_fit(x, y):
         popt, pcov = curve_fit(gaussianC_py, x, y, p0)
         estimate = False
     except RuntimeError:
-        print("No fitted result, only estimate possible.")
         popt = p0
     y_fit = gaussianC(x, popt[0], popt[1], popt[2], popt[3])
     return y_fit, estimate, popt

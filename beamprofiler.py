@@ -8,6 +8,7 @@ import pyqtgraph as pg
 from gaussfit import gaussian_fit 
 
 qualitative_colors = [(228,26,28),(55,126,184),(77,175,74),(152,78,163),(255,127,0)]
+grey = (211,211,211)
 
 class MainWindow(QtGui.QMainWindow):
     """Docstring for MainWindow. """
@@ -131,7 +132,7 @@ class MainWindow(QtGui.QMainWindow):
 
         else:
             self.cp_gaussian.setData([], [])
-
+            self.rp_gaussian.setData([], [])
 
     def reset_ROI(self):
         self.roi.setSize([self.cols, self.rows])
@@ -228,8 +229,12 @@ class MainWindow(QtGui.QMainWindow):
         self.rp_curve.setData(x=rp, y=self.rows_array)
         if self.gaussian:
             x_fit = gaussian_fit(self.rows_array, rp)
+            if not x_fit[1]: # not estimate
+                self.rp_gaussian.setPen(qualitative_colors[0])
+            else:
+                self.rp_gaussian.setPen(grey)
             self.rp_gaussian.setData(x=x_fit[0], y=self.rows_array)
-    # add column profile
+
     def calculate_col_profile(self):
         y_integration_limits = self.y_int_lims
         im_data = self.im_data
@@ -240,6 +245,10 @@ class MainWindow(QtGui.QMainWindow):
         self.cp_curve.setData(y=cp)
         if self.gaussian:
             y_fit = gaussian_fit(self.cols_array, cp)
+            if not y_fit[1]: # not estimate
+                self.cp_gaussian.setPen(qualitative_colors[0])
+            else:
+                self.cp_gaussian.setPen(grey)
             self.cp_gaussian.setData(y=y_fit[0])
 
     def toggle_capture(self):
