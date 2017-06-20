@@ -5,7 +5,8 @@ import PyCapture2 as pc2
 import numpy as np
 from PyQt4 import QtGui, QtCore
 import pyqtgraph as pg
-from gaussfit import gaussian_fit 
+from pyqtgraph.dockarea import  DockArea, Dock
+from gaussfit import gaussian_fit
 
 qualitative_colors = [(228,26,28),(55,126,184),(77,175,74),(152,78,163),(255,127,0)]
 grey = (211,211,211)
@@ -33,12 +34,20 @@ class MainWindow(QtGui.QMainWindow):
         win = self.win
         win.resize(1000,600)
         self.setCentralWidget(win)
-        imageview = win.addViewBox(row=0, col=0, lockAspect=True)
-        self.imageview = imageview
+
+        # add layout 
+        self._add_window_layout()
+
+        # create menu bar
         self.create_camera_menu()
 
         # add image plot
-        img = pg.ImageItem(border='w')
+        imageview = pg.ViewBox(lockAspect=True)
+        imageview_layout = pg.GraphicsLayoutWidget()
+        imageview_layout.addItem(imageview)
+        self.vlayout.addWidget(imageview_layout, 0, 0)
+        self.imageview = imageview
+        img = pg.ImageItem(view=imageview, border='w')
         imageview.addItem(img)
         im_data = self.get_image()
         self.im_data = im_data
@@ -66,7 +75,8 @@ class MainWindow(QtGui.QMainWindow):
 
         # add row profile plot
         rp = self.calculate_row_profile()
-        rp_plot = win.addPlot(row=0, col=1)
+        rp_plot = pg.PlotWidget()
+        self.vlayout.addWidget(rp_plot, 0, 1)
         rp_plot.hideAxis('bottom')
         self.rp_curve = rp_plot.plot(x=rp, y=np.arange(self.rows),pen=qualitative_colors[1])
         self.rp_plot = rp_plot
@@ -75,7 +85,8 @@ class MainWindow(QtGui.QMainWindow):
 
         # add columnn profile
         cp = self.calculate_col_profile()
-        cp_plot = win.addPlot(row=1, col=0)
+        cp_plot = pg.PlotWidget()
+        self.vlayout.addWidget(cp_plot, 1, 0)
         cp_plot.hideAxis('left')
         self.cp_curve = cp_plot.plot(y=cp, pen=qualitative_colors[1])
         self.cp_plot = cp_plot
@@ -84,7 +95,7 @@ class MainWindow(QtGui.QMainWindow):
 
         # set state parameters
         self.capturing = True
-        self.gaussian = False 
+        self.gaussian = False
         self.gaussian_inited = False
 
         # add functional buttons
@@ -93,25 +104,40 @@ class MainWindow(QtGui.QMainWindow):
         self._add_reset_roi_btn()
         self._add_gaussfit_btn()
 
-    def _add_btn_layout(self):
-        vlayout = pg.LayoutWidget(self.win)
+    def _add_window_layout(self):
+        vlayout = QtGui.QGridLayout(self.win)
         self.vlayout = vlayout
 
+    def _add_btn_layout(self):
+        # add a DockArea for buttons
+        area = DockArea()
+        dock = Dock("Functions")
+        area.addDock(dock)
+        area.show()
+
+        self.vlayout.addWidget(area, 1, 1)
+        btn_layout = pg.LayoutWidget()
+        dock.addWidget(btn_layout)
+        self.btn_layout = btn_layout
+
     def _add_capture_toggle_btn(self):
-        btn = QtGui.QPushButton('Start/Stop', self.vlayout)
+        btn = QtGui.QPushButton('Start/Stop')
         btn.clicked.connect(self.toggle_capture)
-        self.vlayout.addWidget(btn)
+        self.btn_layout.addWidget(btn)
+        self.btn_layout.nextRow()
         self.btn_toggle_capture = btn
 
     def _add_reset_roi_btn(self):
-        btn = QtGui.QPushButton('Reset ROI', self)
-        self.vlayout.addWidget(btn)
+        btn = QtGui.QPushButton('Reset ROI')
+        self.btn_layout.addWidget(btn)
+        self.btn_layout.nextRow()
         btn.clicked.connect(self.reset_ROI)
         self.btn_reset_roi = btn
 
     def _add_gaussfit_btn(self):
-        btn = QtGui.QPushButton('Gaussian Fit ON/OFF', self)
-        self.vlayout.addWidget(btn)
+        btn = QtGui.QPushButton('Gaussian Fit ON/OFF')
+        self.btn_layout.addWidget(btn)
+        self.btn_layout.nextRow()
         btn.clicked.connect(self.toggle_gaussian)
         btn.clicked.connect(self.updateRowprofile)
         btn.clicked.connect(self.updateColprofile)

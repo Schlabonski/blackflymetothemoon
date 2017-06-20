@@ -46,17 +46,14 @@ def gaussian_estimate(np.ndarray x, np.ndarray y):
     sigma_0 = mu_0 - x[sigma_0_ind]
     
     
-    # II. In the second part we fit a gaussian to the data
+    # II. In the second part we calculate the estimate
     
-    # TODO: Maybe its not really necessary to perform a fit. A good estimate might
-    # be enough for the purpose of beam profiling
     y_fit = gaussianC(x, mu_0, sigma_0, C0, A0)
     
     return y_fit, mu_0, sigma_0, C0, A0
 
 @cython.boundscheck(False) # turn off bounds-checking for entire function
 @cython.wraparound(False)  # turn off negative index wrapping for entire function
-#cdef gaussianC(np.ndarray x, np.float64_t mu, np.float64_t sigma, np.float64_t C, np.float64_t A0):
 cdef gaussianC(np.ndarray x, np.float64_t mu, np.float64_t sigma, np.float64_t C, np.float64_t A0):
     return A0 * A /sigma * np.exp(-(x-mu)**2/(2*sigma**2)) + C
 
