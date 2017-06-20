@@ -1,15 +1,21 @@
+import time
+
+import pyximport; pyximport.install()
 import PyCapture2 as pc2
 import numpy as np
 from PyQt4 import QtGui, QtCore
 import pyqtgraph as pg
-
-cols = 1920
-rows = 1200
+from gaussfit import gaussian_fit 
 
 qualitative_colors = [(228,26,28),(55,126,184),(77,175,74),(152,78,163),(255,127,0)]
 
 class MainWindow(QtGui.QMainWindow):
     """Docstring for MainWindow. """
+
+    cols = 1920
+    rows = 1200
+    cols_array = np.arange(cols)
+    rows_array = np.arange(rows)
 
     def __init__(self, parent=None):
         """TODO: to be defined1. """
@@ -45,62 +51,91 @@ class MainWindow(QtGui.QMainWindow):
         acquisition_timer.start(self.acquisition_timer_interval)
 
         # add a region of interest to the image
-        roi = pg.RectROI([0, 0], [cols, rows], pen=qualitative_colors[0])
+        roi = pg.RectROI([0, 0], [self.cols, self.rows], pen=qualitative_colors[0])
         roi.addScaleHandle(pos=(0,0), center=(1,1))
         imageview.addItem(roi)
         self.roi = roi
         roi.sigRegionChanged.connect(self.update_roi)
         
         # create integration limits for the profiles
-        x_integration_limits = [0, cols]
-        y_integration_limits = [0, rows]
+        x_integration_limits = [0, self.cols]
+        y_integration_limits = [0, self.rows]
         self.x_int_lims = x_integration_limits
         self.y_int_lims = y_integration_limits
 
         # add row profile plot
         rp = self.calculate_row_profile()
         rp_plot = win.addPlot(row=0, col=1)
-        self.rp_curve = rp_plot.plot(x=rp, y=np.arange(rows),pen=qualitative_colors[1])
+        rp_plot.hideAxis('bottom')
+        self.rp_curve = rp_plot.plot(x=rp, y=np.arange(self.rows),pen=qualitative_colors[1])
+        self.rp_plot = rp_plot
 
         acquisition_timer.timeout.connect(self.updateRowprofile)
 
         # add columnn profile
         cp = self.calculate_col_profile()
         cp_plot = win.addPlot(row=1, col=0)
+        cp_plot.hideAxis('left')
         self.cp_curve = cp_plot.plot(y=cp, pen=qualitative_colors[1])
+        self.cp_plot = cp_plot
 
         acquisition_timer.timeout.connect(self.updateColprofile)
 
         # set state parameters
         self.capturing = True
+        self.gaussian = False 
+        self.gaussian_inited = False
 
         # add functional buttons
-        self._add_button_layout()
-        self._add_capture_toggle_button()
-        self._add_reset_roi_button()
+        self._add_btn_layout()
+        self._add_capture_toggle_btn()
+        self._add_reset_roi_btn()
+        self._add_gaussfit_btn()
 
-    def _add_button_layout(self):
-        self.layout = QtGui.QVBoxLayout(self)
-        self.layout.setSpacing(0)
-        self.layout.setMargin(20)
-        
-    def _add_capture_toggle_button(self):
-        self.button_toggle_capture = QtGui.QPushButton('Start/Stop', self)
-        self.button_toggle_capture.clicked.connect(self.toggle_capture)
-        #layout = QtGui.QHBoxLayout(self)
-        #layout.addWidget(self.button_toggle_capture)
-        #self.button_toggle_capture.setParent(self.win)
-        #self.button_toggle_capture.show()
-        self.layout.insertWidget(0, self.button_toggle_capture)
+    def _add_btn_layout(self):
+        vlayout = pg.LayoutWidget(self.win)
+        self.vlayout = vlayout
 
-    def _add_reset_roi_button(self):
-        self.button_reset_roi = QtGui.QPushButton('Reset ROI', self)
-        #self.button_reset_roi.setParent(self.win)
-        #self.button_reset_roi.show()
-        self.layout.insertWidget(1, self.button_reset_roi)
-        #TODO: This button is placed above the other button :(
-        # Further it should be connected to a method that resets the region of interest.
+    def _add_capture_toggle_btn(self):
+        btn = QtGui.QPushButton('Start/Stop', self.vlayout)
+        btn.clicked.connect(self.toggle_capture)
+        self.vlayout.addWidget(btn)
+        self.btn_toggle_capture = btn
 
+    def _add_reset_roi_btn(self):
+        btn = QtGui.QPushButton('Reset ROI', self)
+        self.vlayout.addWidget(btn)
+        btn.clicked.connect(self.reset_ROI)
+        self.btn_reset_roi = btn
+
+    def _add_gaussfit_btn(self):
+        btn = QtGui.QPushButton('Gaussian Fit ON/OFF', self)
+        self.vlayout.addWidget(btn)
+        btn.clicked.connect(self.toggle_gaussian)
+        btn.clicked.connect(self.updateRowprofile)
+        btn.clicked.connect(self.updateColprofile)
+        self.btn_gaussian = btn
+
+    def toggle_gaussian(self):
+        self.gaussian = not self.gaussian
+        if self.gaussian:
+            cp = self.calculate_col_profile()
+            y_fit = gaussian_fit(self.cols_array, cp)
+            cp_gaussian = self.cp_plot.plot(x=self.cols_array, y=y_fit[0])
+            self.cp_gaussian = cp_gaussian
+            
+            rp = self.calculate_row_profile()
+            x_fit = gaussian_fit(self.rows_array, rp)
+            rp_gaussian = self.rp_plot.plot(x=x_fit[0], y=self.rows_array)
+            self.rp_gaussian = rp_gaussian
+
+        else:
+            self.cp_gaussian.setData([], [])
+
+
+    def reset_ROI(self):
+        self.roi.setSize([self.cols, self.rows])
+        self.roi.setPos([0,0])
     
     def create_camera_menu(self):
         # add a menu bar to the window for advanced blackfly control
@@ -129,13 +164,26 @@ class MainWindow(QtGui.QMainWindow):
 
     def init_cam(self):
         # 1. Start the bus interface
-        bus = pc2.BusManager()
-        bus.forceAllIPAddressesAutomatically() # necessary due to my networking inabilities
 
         # 2. Connect to the camera and start capturin
-        cam = pc2.Camera()
-        cam.connect(bus.getCameraFromIndex(0))
-        cam.startCapture()
+        # often the camera throws a bus master failure in the first and a isochronous start failure
+        # in the second connection attempt. These are supposed to be caught in the following.
+        for i in range(100):
+            try:
+                bus = pc2.BusManager()
+                bus.forceAllIPAddressesAutomatically() # necessary due to my networking inabilities
+                cam = pc2.Camera()
+                cam.connect(bus.getCameraFromIndex(0))
+                cam.startCapture()
+                time.sleep(.1)
+            except pc2.Fc2error as e:
+                cam.disconnect()
+                del cam, bus
+                print(e)
+                print("Retrying...")
+            else:
+                break
+
         self.cam = cam
 
         # 3. collect framerates, videomodes, ...
@@ -165,9 +213,9 @@ class MainWindow(QtGui.QMainWindow):
         y_integration_limits = self.y_int_lims
         boundaries = self.roi.parentBounds().getCoords()
         x_integration_limits[0] = int(max(boundaries[0], 0))
-        x_integration_limits[1] = int(min(boundaries[2], cols))
+        x_integration_limits[1] = int(min(boundaries[2], self.cols))
         y_integration_limits[0] = int(max(boundaries[1], 0))
-        y_integration_limits[1] = int(min(boundaries[3], rows))
+        y_integration_limits[1] = int(min(boundaries[3], self.rows))
 
     # add row profile
     def calculate_row_profile(self):
@@ -177,8 +225,10 @@ class MainWindow(QtGui.QMainWindow):
 
     def updateRowprofile(self):
         rp = self.calculate_row_profile()
-        self.rp_curve.setData(x=rp, y=np.arange(rows))
-
+        self.rp_curve.setData(x=rp, y=self.rows_array)
+        if self.gaussian:
+            x_fit = gaussian_fit(self.rows_array, rp)
+            self.rp_gaussian.setData(x=x_fit[0], y=self.rows_array)
     # add column profile
     def calculate_col_profile(self):
         y_integration_limits = self.y_int_lims
@@ -188,6 +238,9 @@ class MainWindow(QtGui.QMainWindow):
     def updateColprofile(self):
         cp = self.calculate_col_profile()
         self.cp_curve.setData(y=cp)
+        if self.gaussian:
+            y_fit = gaussian_fit(self.cols_array, cp)
+            self.cp_gaussian.setData(y=y_fit[0])
 
     def toggle_capture(self):
         #TODO: Write a method that toggles the capture and processing of images.
