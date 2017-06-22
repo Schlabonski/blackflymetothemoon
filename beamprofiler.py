@@ -234,7 +234,12 @@ class MainWindow(QtGui.QMainWindow):
 
         """
         cam = self.cam
-        im = cam.retrieveBuffer()
+        while True:
+            try:
+                im = cam.retrieveBuffer()
+                break
+            except pc2.Fc2error as e:
+                print(e)
         a = self.im_to_array(im) # for numpy manipulation of data
         return a
 
