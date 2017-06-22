@@ -20,10 +20,13 @@ class MainWindow(QtGui.QMainWindow):
     rows = 1200
     cols_array = np.arange(cols)
     rows_array = np.arange(rows)
+    acquisition_timer_interval = 40
 
     def __init__(self, parent=None):
         """TODO: to be defined1. """
         super(MainWindow, self).__init__(parent)
+	## Initialize cam
+        self.init_cam()
 
         ## Switch to using white background and black foreground
         pg.setConfigOption('background', 'w')
@@ -32,7 +35,6 @@ class MainWindow(QtGui.QMainWindow):
         # initialize the main window
         self.setWindowTitle('BlackFly me to the moon')
         self.win = pg.GraphicsWindow()
-        self.init_cam()
         win = self.win
         win.resize(1000,600)
         self.setCentralWidget(win)
@@ -58,7 +60,6 @@ class MainWindow(QtGui.QMainWindow):
 
         acquisition_timer = QtCore.QTimer(parent=win)
         self.acquisition_timer = acquisition_timer
-        self.acquisition_timer_interval = 50
         acquisition_timer.timeout.connect(self.updateImage)
         acquisition_timer.start(self.acquisition_timer_interval)
 
@@ -193,7 +194,6 @@ class MainWindow(QtGui.QMainWindow):
 
     def init_cam(self):
         # 1. Start the bus interface
-
         # 2. Connect to the camera and start capturin
         # often the camera throws a bus master failure in the first and a isochronous start failure
         # in the second connection attempt. These are supposed to be caught in the following.
@@ -201,8 +201,13 @@ class MainWindow(QtGui.QMainWindow):
             try:
                 bus = pc2.BusManager()
                 bus.forceAllIPAddressesAutomatically() # necessary due to my networking inabilities
-                cam = pc2.Camera()
+                cam = pc2.GigECamera()
                 cam.connect(bus.getCameraFromIndex(0))
+                # set up camera for GigE use
+                gigeconf = pc2.GigEConfig(enablePacketResend=True)
+                cam.setGigEConfig(gigeconf)
+                
+                # start streaming
                 cam.startCapture()
                 time.sleep(.1)
             except pc2.Fc2error as e:
@@ -214,6 +219,7 @@ class MainWindow(QtGui.QMainWindow):
                 break
 
         self.cam = cam
+        im = self.get_image()
 
         # 3. collect framerates, videomodes, ...
         fr = pc2.FRAMERATE
