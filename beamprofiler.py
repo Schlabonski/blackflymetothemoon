@@ -1,11 +1,13 @@
 import time
 
-import pyximport; pyximport.install()
 import PyCapture2 as pc2
 import numpy as np
 from PyQt4 import QtGui, QtCore
 import pyqtgraph as pg
 from pyqtgraph.dockarea import  DockArea, Dock
+
+import pyximport; pyximport.install(setup_args={"script_args":["--compiler=unix"],
+					"include_dirs":np.get_include()}, reload_support=True)
 from gaussfit import gaussian_fit
 
 qualitative_colors = [(228,26,28),(55,126,184),(77,175,74),(152,78,163),(255,127,0)]
