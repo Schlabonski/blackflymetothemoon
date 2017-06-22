@@ -295,7 +295,9 @@ class MainWindow(QtGui.QMainWindow):
         # Can this be done by disconnecting or stopping the main data acquisition timer?
         if self.capturing:
             self.acquisition_timer.stop()
+            self.cam.stopCapture()
         else:
+            self.cam.startCapture()
             self.acquisition_timer.start(self.acquisition_timer_interval)
 
         self.capturing = not self.capturing
