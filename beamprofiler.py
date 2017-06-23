@@ -3,7 +3,7 @@ import logging
 
 import PyCapture2 as pc2
 import numpy as np
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtGui, QtCore
 import pyqtgraph as pg
 from pyqtgraph.dockarea import  DockArea, Dock
 
