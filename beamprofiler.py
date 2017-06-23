@@ -1,4 +1,5 @@
 import time
+import logging
 
 import PyCapture2 as pc2
 import numpy as np
@@ -9,6 +10,16 @@ from pyqtgraph.dockarea import  DockArea, Dock
 import pyximport; pyximport.install(setup_args={"script_args":["--compiler=unix"],
 					"include_dirs":np.get_include()}, reload_support=True)
 from gaussfit import gaussian_fit
+
+import cProfile
+
+def profile(func):
+    def wrapper(*args, **kwargs):
+        datafn = func.__name__
+        logging.debug('%s called' % datafn)
+        return func(*args, **kwargs)
+
+    return wrapper
 
 qualitative_colors = [(228,26,28),(55,126,184),(77,175,74),(152,78,163),(255,127,0)]
 grey = (211,211,211)
@@ -183,7 +194,6 @@ class MainWindow(QtGui.QMainWindow):
         output = self.popup.getItem(self, 'Video mode', 'Select a video mode', self.video_modes,
                 current=vmfr[0])
         print(output)
-        
 
     def im_to_array(self, im):
         imarr = np.array(im.getData())
@@ -303,6 +313,12 @@ class MainWindow(QtGui.QMainWindow):
         self.capturing = not self.capturing
 
 def main():
+    logging.basicConfig(filename='beamprofiler.log',
+                                filemode='w',
+                                format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                                datefmt='%H:%M:%S',
+                                level=logging.DEBUG)
+    logging.info('Started.')
     app = QtGui.QApplication(sys.argv)
     window = MainWindow()
     window.show()
