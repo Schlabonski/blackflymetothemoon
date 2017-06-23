@@ -214,8 +214,16 @@ class MainWindow(QtGui.QMainWindow):
                 cam = pc2.GigECamera()
                 cam.connect(bus.getCameraFromIndex(0))
                 # set up camera for GigE use
-                gigeconf = pc2.GigEConfig(enablePacketResend=True)
+                gigeconf = cam.getGigEConfig()
+                gigeconf.enablePacketResend = True
                 cam.setGigEConfig(gigeconf)
+
+                # set up configuration of camera
+                conf = cam.getConfiguration()
+                conf.numBuffers = 4
+                conf.grabTimeout = self.acquisition_timer_interval
+                conf.grabMode = 1 # BUFFER_FRAMES grab mode, see docs
+                cam.setConfiguration(conf)
                 
                 # start streaming
                 cam.startCapture()
@@ -229,7 +237,6 @@ class MainWindow(QtGui.QMainWindow):
                 break
 
         self.cam = cam
-        im = self.get_image()
 
         # 3. collect framerates, videomodes, ...
         fr = pc2.FRAMERATE
@@ -238,20 +245,29 @@ class MainWindow(QtGui.QMainWindow):
         vm = pc2.VIDEO_MODE
         self.video_modes = [v for v in dir(vm) if not v.startswith('__')]
 
+    @profile
     def get_image(self):
         """Returns an image.
         :returns: np.ndarray
 
         """
         cam = self.cam
-        while True:
-            try:
-                im = cam.retrieveBuffer()
-                break
-            except pc2.Fc2error as e:
-                print(e)
-        a = self.im_to_array(im) # for numpy manipulation of data
-        return a
+        logging.debug("Trying to retrieve Buffer.")
+        try:
+            im = cam.retrieveBuffer()
+            logging.debug("Buffer retrieved. Converting to array.")
+            a = self.im_to_array(im) # for numpy manipulation of data
+            logging.debug("Array conversion done.")
+            return a
+        except pc2.Fc2error as e:
+            logging.error(e)
+            if 'Timeout error' in e.__str__(): # this can cause the program to freeze
+                logging.info("Restarting stream.")
+                self.toggle_capture()
+                self.toggle_capture()
+            else: # could e.g. be image inconsistency, no restart needed 
+                pass
+            return self.im_data # don't update but don't confuse types either
 
     def updateImage(self):
         im_data = self.get_image()
