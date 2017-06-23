@@ -1,14 +1,25 @@
 import time
+import logging
 
 import PyCapture2 as pc2
 import numpy as np
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtGui, QtCore
 import pyqtgraph as pg
 from pyqtgraph.dockarea import  DockArea, Dock
 
 import pyximport; pyximport.install(setup_args={"script_args":["--compiler=unix"],
 					"include_dirs":np.get_include()}, reload_support=True)
 from gaussfit import gaussian_fit
+
+import cProfile
+
+def profile(func):
+    def wrapper(*args, **kwargs):
+        datafn = func.__name__
+        logging.debug('%s called' % datafn)
+        return func(*args, **kwargs)
+
+    return wrapper
 
 qualitative_colors = [(228,26,28),(55,126,184),(77,175,74),(152,78,163),(255,127,0)]
 grey = (211,211,211)
@@ -183,7 +194,6 @@ class MainWindow(QtGui.QMainWindow):
         output = self.popup.getItem(self, 'Video mode', 'Select a video mode', self.video_modes,
                 current=vmfr[0])
         print(output)
-        
 
     def im_to_array(self, im):
         imarr = np.array(im.getData())
@@ -204,8 +214,16 @@ class MainWindow(QtGui.QMainWindow):
                 cam = pc2.GigECamera()
                 cam.connect(bus.getCameraFromIndex(0))
                 # set up camera for GigE use
-                gigeconf = pc2.GigEConfig(enablePacketResend=True)
+                gigeconf = cam.getGigEConfig()
+                gigeconf.enablePacketResend = True
                 cam.setGigEConfig(gigeconf)
+
+                # set up configuration of camera
+                conf = cam.getConfiguration()
+                conf.numBuffers = 4
+                conf.grabTimeout = self.acquisition_timer_interval
+                conf.grabMode = 1 # BUFFER_FRAMES grab mode, see docs
+                cam.setConfiguration(conf)
                 
                 # start streaming
                 cam.startCapture()
@@ -219,7 +237,6 @@ class MainWindow(QtGui.QMainWindow):
                 break
 
         self.cam = cam
-        im = self.get_image()
 
         # 3. collect framerates, videomodes, ...
         fr = pc2.FRAMERATE
@@ -228,20 +245,29 @@ class MainWindow(QtGui.QMainWindow):
         vm = pc2.VIDEO_MODE
         self.video_modes = [v for v in dir(vm) if not v.startswith('__')]
 
+    @profile
     def get_image(self):
         """Returns an image.
         :returns: np.ndarray
 
         """
         cam = self.cam
-        while True:
-            try:
-                im = cam.retrieveBuffer()
-                break
-            except pc2.Fc2error as e:
-                print(e)
-        a = self.im_to_array(im) # for numpy manipulation of data
-        return a
+        logging.debug("Trying to retrieve Buffer.")
+        try:
+            im = cam.retrieveBuffer()
+            logging.debug("Buffer retrieved. Converting to array.")
+            a = self.im_to_array(im) # for numpy manipulation of data
+            logging.debug("Array conversion done.")
+            return a
+        except pc2.Fc2error as e:
+            logging.error(e)
+            if 'Timeout error' in e.__str__(): # this can cause the program to freeze
+                logging.info("Restarting stream.")
+                self.toggle_capture()
+                self.toggle_capture()
+            else: # could e.g. be image inconsistency, no restart needed 
+                pass
+            return self.im_data # don't update but don't confuse types either
 
     def updateImage(self):
         im_data = self.get_image()
@@ -303,6 +329,12 @@ class MainWindow(QtGui.QMainWindow):
         self.capturing = not self.capturing
 
 def main():
+    logging.basicConfig(filename='beamprofiler.log',
+                                filemode='w',
+                                format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                                datefmt='%H:%M:%S',
+                                level=logging.DEBUG)
+    logging.info('Started.')
     app = QtGui.QApplication(sys.argv)
     window = MainWindow()
     window.show()
