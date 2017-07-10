@@ -1,5 +1,6 @@
 #! /usr/bin/python3
 
+import sys
 import time
 import logging
 
@@ -25,6 +26,8 @@ def profile(func):
 
 qualitative_colors = [(228,26,28),(55,126,184),(77,175,74),(152,78,163),(255,127,0)]
 grey = (211,211,211)
+camera_index = int(sys.argv[1])
+camera_serial_numbers = [16292944, 16302806]
 
 class MainWindow(QtGui.QMainWindow):
     """Docstring for MainWindow. """
@@ -33,20 +36,27 @@ class MainWindow(QtGui.QMainWindow):
     rows = 1200
     cols_array = np.arange(cols)
     rows_array = np.arange(rows)
-    acquisition_timer_interval = 40
+    acquisition_timer_interval = 1000
 
     def __init__(self, parent=None):
         """TODO: to be defined1. """
         super(MainWindow, self).__init__(parent)
+
+        # set state parameters
+        self.capturing = True
+        self.gaussian = False
+        self.gaussian_inited = False
+        self.acquisition_inited = False
+
 	## Initialize cam
         self.init_cam()
 
         ## Switch to using white background and black foreground
-        pg.setConfigOption('background', 'w')
-        pg.setConfigOption('foreground', 'k')
+        pg.setConfigOption('background', 'k')
+        pg.setConfigOption('foreground', 'w')
 
         # initialize the main window
-        self.setWindowTitle('BlackFly me to the moon')
+        self.setWindowTitle('BlackFly me to the moon {0}'.format(camera_serial_numbers[camera_index]))
         self.win = pg.GraphicsWindow()
         win = self.win
         win.resize(1000,600)
@@ -66,15 +76,19 @@ class MainWindow(QtGui.QMainWindow):
         self.imageview = imageview
         img = pg.ImageItem(view=imageview, border='w')
         imageview.addItem(img)
+        self.im_data = np.zeros((self.cols, self.rows))
         im_data = self.get_image()
         self.im_data = im_data
         img.setImage(im_data)
         self.img = img
 
+        # main data acquisition timer
         acquisition_timer = QtCore.QTimer(parent=win)
         self.acquisition_timer = acquisition_timer
         acquisition_timer.timeout.connect(self.updateImage)
         acquisition_timer.start(self.acquisition_timer_interval)
+        self.acquisition_inited = True
+
 
         # add a region of interest to the image
         roi = pg.RectROI([0, 0], [self.cols, self.rows], pen=qualitative_colors[0])
@@ -108,11 +122,6 @@ class MainWindow(QtGui.QMainWindow):
         self.cp_plot = cp_plot
 
         acquisition_timer.timeout.connect(self.updateColprofile)
-
-        # set state parameters
-        self.capturing = True
-        self.gaussian = False
-        self.gaussian_inited = False
 
         # add functional buttons
         self._add_btn_layout()
@@ -199,7 +208,11 @@ class MainWindow(QtGui.QMainWindow):
 
     def im_to_array(self, im):
         imarr = np.array(im.getData())
-        imarr = np.reshape(imarr, (im.getRows(), im.getCols()))
+        self.rows = im.getRows()
+        self.cols = im.getCols()
+        self.rows_array = np.arange(self.rows)
+        self.cols_array = np.arange(self.cols)
+        imarr = np.reshape(imarr, (self.rows, self.cols))
         imarr = imarr.T
         imarr = imarr[::,::-1]
         return imarr.astype(np.float64)
@@ -214,7 +227,7 @@ class MainWindow(QtGui.QMainWindow):
                 bus = pc2.BusManager()
                 bus.forceAllIPAddressesAutomatically() # necessary due to my networking inabilities
                 cam = pc2.GigECamera()
-                cam.connect(bus.getCameraFromIndex(0))
+                cam.connect(bus.getCameraFromSerialNumber(camera_serial_numbers[camera_index]))
                 # set up camera for GigE use
                 gigeconf = cam.getGigEConfig()
                 gigeconf.enablePacketResend = True
@@ -231,7 +244,11 @@ class MainWindow(QtGui.QMainWindow):
                 cam.startCapture()
                 time.sleep(.1)
             except pc2.Fc2error as e:
-                cam.disconnect()
+                try:
+                    cam.disconnect()
+                except:
+                    pass
+
                 del cam, bus
                 print(e)
                 print("Retrying...")
@@ -247,7 +264,6 @@ class MainWindow(QtGui.QMainWindow):
         vm = pc2.VIDEO_MODE
         self.video_modes = [v for v in dir(vm) if not v.startswith('__')]
 
-    @profile
     def get_image(self):
         """Returns an image.
         :returns: np.ndarray
@@ -263,12 +279,13 @@ class MainWindow(QtGui.QMainWindow):
             return a
         except pc2.Fc2error as e:
             logging.error(e)
-            if 'Timeout error' in e.__str__(): # this can cause the program to freeze
+            if 'Timeout error' in e.__str__() and self.acquisition_inited: # this can cause the program to freeze
                 logging.info("Restarting stream.")
                 self.toggle_capture()
                 self.toggle_capture()
             else: # could e.g. be image inconsistency, no restart needed 
                 pass
+            print(e.__str__())
             return self.im_data # don't update but don't confuse types either
 
     def updateImage(self):
@@ -296,6 +313,7 @@ class MainWindow(QtGui.QMainWindow):
         self.rp_curve.setData(x=rp, y=self.rows_array)
         if self.gaussian:
             x_fit = gaussian_fit(self.rows_array, rp)
+            #print("Row Mean: ", x_fit[2][0])
             if not x_fit[1]: # not estimate
                 self.rp_gaussian.setPen(qualitative_colors[0])
             else:
@@ -312,6 +330,7 @@ class MainWindow(QtGui.QMainWindow):
         self.cp_curve.setData(y=cp)
         if self.gaussian:
             y_fit = gaussian_fit(self.cols_array, cp)
+            print("Col Mean: ", y_fit[2][0])
             if not y_fit[1]: # not estimate
                 self.cp_gaussian.setPen(qualitative_colors[0])
             else:
