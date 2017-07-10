@@ -47,13 +47,15 @@ class MainWindow(QtGui.QMainWindow):
         self.gaussian = False
         self.gaussian_inited = False
         self.acquisition_inited = False
+        self.substract_background = False
+        self.fit_roi_only = False
 
 	## Initialize cam
         self.init_cam()
 
         ## Switch to using white background and black foreground
-        pg.setConfigOption('background', 'k')
-        pg.setConfigOption('foreground', 'w')
+        pg.setConfigOption('background', 'w')
+        pg.setConfigOption('foreground', 'k')
 
         # initialize the main window
         self.setWindowTitle('BlackFly me to the moon {0}'.format(camera_serial_numbers[camera_index]))
@@ -128,6 +130,8 @@ class MainWindow(QtGui.QMainWindow):
         self._add_capture_toggle_btn()
         self._add_reset_roi_btn()
         self._add_gaussfit_btn()
+        self._add_background_save_btn()
+        self._add_background_substraction_checkbox()
 
     def _add_window_layout(self):
         vlayout = QtGui.QGridLayout(self.win)
@@ -167,18 +171,62 @@ class MainWindow(QtGui.QMainWindow):
         btn.clicked.connect(self.updateRowprofile)
         btn.clicked.connect(self.updateColprofile)
         self.btn_gaussian = btn
+    
+    def _add_background_save_btn(self):
+        btn = QtGui.QPushButton('Save background')
+        self.btn_layout.addWidget(btn)
+        self.btn_layout.nextRow()
+        btn.clicked.connect(self._save_background)
+        self.btn_save_background = btn
+
+    def _add_background_substraction_checkbox(self):
+        chbox = QtGui.QCheckBox('Substract background')
+        self.btn_layout.addWidget(chbox)
+        self.btn_layout.nextRow()
+        chbox.stateChanged.connect(self._toggle_substraction)
+        self.chbox_susbtract_background = chbox
+
+    def _save_background(self):
+        """Saves the current im_data to a .npy file for substraction.
+
+        """
+        np.save("background_{0}.npy".format(camera_serial_numbers[camera_index]), self.im_data)
+        if self.substract_background:
+            self.background_array = self.im_data
+    
+    def _toggle_substraction(self):
+        if not self.substract_background:
+            self.background_array = np.load("background_{0}.npy".format(camera_serial_numbers[camera_index]))
+            self.substract_background = True
+
+        else:
+            self.substract_background = False
 
     def toggle_gaussian(self):
         self.gaussian = not self.gaussian
         if self.gaussian:
             cp = self.calculate_col_profile()
-            y_fit = gaussian_fit(self.cols_array, cp)
-            cp_gaussian = self.cp_plot.plot(x=self.cols_array, y=y_fit[0])
+            print(self.x_int_lims)
+            if not self.fit_roi_only:
+                y_fit = gaussian_fit(self.cols_array, cp)
+                cp_gaussian = self.cp_plot.plot(x=self.cols_array, y=y_fit[0])
+            else:
+                x0 = self.x_int_lims[0]
+                x1 = self.x_int_lims[1]
+                y_fit = gaussian_fit(self.cols_array[x0:x1], cp[x0:x1])
+                cp_gaussian = self.cp_plot.plot(x=self.cols_array[x0:x1], y=y_fit[0])
             self.cp_gaussian = cp_gaussian
             
             rp = self.calculate_row_profile()
-            x_fit = gaussian_fit(self.rows_array, rp)
-            rp_gaussian = self.rp_plot.plot(x=x_fit[0], y=self.rows_array)
+            if not self.fit_roi_only:
+                x_fit = gaussian_fit(self.rows_array, rp)
+                rp_gaussian = self.rp_plot.plot(x=x_fit[0], y=self.rows_array)
+            else:
+                y0 = self.y_int_lims[0]
+                y1 = self.y_int_lims[1]
+                x_fit = gaussian_fit(self.rows_array[y0:y1], rp[y0:y1])
+                rp_gaussian = self.rp_plot.plot(x=x_fit[0][y0:y1], y=self.rows_array)
+
             self.rp_gaussian = rp_gaussian
 
         else:
@@ -215,7 +263,10 @@ class MainWindow(QtGui.QMainWindow):
         imarr = np.reshape(imarr, (self.rows, self.cols))
         imarr = imarr.T
         imarr = imarr[::,::-1]
-        return imarr.astype(np.float64)
+        imarr = imarr.astype(np.float64)
+        if self.substract_background:
+            imarr -= self.background_array
+        return imarr
 
     def init_cam(self):
         # 1. Start the bus interface
@@ -243,6 +294,8 @@ class MainWindow(QtGui.QMainWindow):
                 # start streaming
                 cam.startCapture()
                 time.sleep(.1)
+                print("Started stream for cam {0}".format(camera_serial_numbers[camera_index]))
+
             except pc2.Fc2error as e:
                 try:
                     cam.disconnect()
