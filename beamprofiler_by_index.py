@@ -1,6 +1,8 @@
 #! /usr/bin/python3
 
+import datetime
 import sys
+import os
 import time
 import logging
 
@@ -26,10 +28,13 @@ def profile(func):
 
 qualitative_colors = [(228,26,28),(55,126,184),(77,175,74),(152,78,163),(255,127,0)]
 grey = (211,211,211)
-camera_index = int(sys.argv[1])
+try:
+    camera_index = int(sys.argv[1])
+except:
+    pass
 camera_serial_numbers = [16292944, 16302806]
 
-class MainWindow(QtGui.QMainWindow):
+class CameraWindow(QtGui.QMainWindow):
     """Docstring for MainWindow. """
 
     cols = 1920
@@ -38,9 +43,9 @@ class MainWindow(QtGui.QMainWindow):
     rows_array = np.arange(rows)
     acquisition_timer_interval = 1000
 
-    def __init__(self, parent=None):
+    def __init__(self, cam=None, parent=None, serial=None):
         """TODO: to be defined1. """
-        super(MainWindow, self).__init__(parent)
+        super(CameraWindow, self).__init__(parent)
 
         # set state parameters
         self.capturing = True
@@ -48,17 +53,22 @@ class MainWindow(QtGui.QMainWindow):
         self.gaussian_inited = False
         self.acquisition_inited = False
         self.substract_background = False
-        self.fit_roi_only = False
+        self.fit_roi_only = True
 
 	## Initialize cam
-        self.init_cam()
+        if cam is None:
+            self.init_cam()
+            self.serial = camera_serial_numbers[camera_index]
+        else:
+            self.cam = cam
+            self.serial = serial
 
         ## Switch to using white background and black foreground
         pg.setConfigOption('background', 'w')
         pg.setConfigOption('foreground', 'k')
 
         # initialize the main window
-        self.setWindowTitle('BlackFly me to the moon {0}'.format(camera_serial_numbers[camera_index]))
+        self.setWindowTitle('BlackFly me to the moon {0}'.format(serial))
         self.win = pg.GraphicsWindow()
         win = self.win
         win.resize(1000,600)
@@ -68,7 +78,7 @@ class MainWindow(QtGui.QMainWindow):
         self._add_window_layout()
 
         # create menu bar
-        self.create_camera_menu()
+        #self.create_camera_menu()
 
         # add image plot
         imageview = pg.ViewBox(lockAspect=True)
@@ -109,7 +119,7 @@ class MainWindow(QtGui.QMainWindow):
         rp = self.calculate_row_profile()
         rp_plot = pg.PlotWidget()
         self.vlayout.addWidget(rp_plot, 0, 1)
-        rp_plot.hideAxis('bottom')
+        #rp_plot.hideAxis('bottom')
         self.rp_curve = rp_plot.plot(x=rp, y=np.arange(self.rows),pen=qualitative_colors[1])
         self.rp_plot = rp_plot
 
@@ -119,7 +129,7 @@ class MainWindow(QtGui.QMainWindow):
         cp = self.calculate_col_profile()
         cp_plot = pg.PlotWidget()
         self.vlayout.addWidget(cp_plot, 1, 0)
-        cp_plot.hideAxis('left')
+        #cp_plot.hideAxis('left')
         self.cp_curve = cp_plot.plot(y=cp, pen=qualitative_colors[1])
         self.cp_plot = cp_plot
 
@@ -132,9 +142,30 @@ class MainWindow(QtGui.QMainWindow):
         self._add_gaussfit_btn()
         self._add_background_save_btn()
         self._add_background_substraction_checkbox()
+        self._add_dump_data_btn()
+
+        # create a popup window that shows the results of the gauss fit in
+        # a scroll plot
+        self.scwin = ScrollWindow(parent=self)
+        self.acquisition_timer.timeout.connect(self.scwin.updatePlot)
+
+    def closeEvent(self, event):
+        event.accept()
+        try:
+            self.cam.stopCapture()
+            self.cam.disconnect()
+            del cam
+        except:
+            pass
+        self.scwin.deleteLater()
+        self.deleteLater()
 
     def _add_window_layout(self):
         vlayout = QtGui.QGridLayout(self.win)
+        vlayout.setColumnStretch(0, 2)
+        vlayout.setColumnStretch(1, 1)
+        vlayout.setRowStretch(0,2)
+        vlayout.setRowStretch(1,1)
         self.vlayout = vlayout
 
     def _add_btn_layout(self):
@@ -186,17 +217,24 @@ class MainWindow(QtGui.QMainWindow):
         chbox.stateChanged.connect(self._toggle_substraction)
         self.chbox_susbtract_background = chbox
 
+    def _add_dump_data_btn(self):
+        btn = QtGui.QPushButton('Save data')
+        self.btn_layout.addWidget(btn)
+        self.btn_layout.nextRow()
+        btn.clicked.connect(self._dump_data)
+        self.btn_dump_data = btn
+
     def _save_background(self):
         """Saves the current im_data to a .npy file for substraction.
 
         """
-        np.save("background_{0}.npy".format(camera_serial_numbers[camera_index]), self.im_data)
+        np.save("background_{0}.npy".format(self.serial), self.im_data)
         if self.substract_background:
             self.background_array = self.im_data
     
     def _toggle_substraction(self):
         if not self.substract_background:
-            self.background_array = np.load("background_{0}.npy".format(camera_serial_numbers[camera_index]))
+            self.background_array = np.load("background_{0}.npy".format(self.serial))
             self.substract_background = True
 
         else:
@@ -206,7 +244,6 @@ class MainWindow(QtGui.QMainWindow):
         self.gaussian = not self.gaussian
         if self.gaussian:
             cp = self.calculate_col_profile()
-            print(self.x_int_lims)
             if not self.fit_roi_only:
                 y_fit = gaussian_fit(self.cols_array, cp)
                 cp_gaussian = self.cp_plot.plot(x=self.cols_array, y=y_fit[0])
@@ -225,7 +262,7 @@ class MainWindow(QtGui.QMainWindow):
                 y0 = self.y_int_lims[0]
                 y1 = self.y_int_lims[1]
                 x_fit = gaussian_fit(self.rows_array[y0:y1], rp[y0:y1])
-                rp_gaussian = self.rp_plot.plot(x=x_fit[0][y0:y1], y=self.rows_array)
+                rp_gaussian = self.rp_plot.plot(x=x_fit[0], y=self.rows_array[y0:y1])
 
             self.rp_gaussian = rp_gaussian
 
@@ -274,8 +311,15 @@ class MainWindow(QtGui.QMainWindow):
         # often the camera throws a bus master failure in the first and a isochronous start failure
         # in the second connection attempt. These are supposed to be caught in the following.
         for i in range(100):
+            print("detect bus")
             try:
+                print("init cam")
                 bus = pc2.BusManager()
+
+                # test code
+                cams=bus.discoverGigECameras(10)
+                print(cams)
+                # end test code
                 bus.forceAllIPAddressesAutomatically() # necessary due to my networking inabilities
                 cam = pc2.GigECamera()
                 cam.connect(bus.getCameraFromSerialNumber(camera_serial_numbers[camera_index]))
@@ -304,7 +348,7 @@ class MainWindow(QtGui.QMainWindow):
 
                 del cam, bus
                 print(e)
-                print("Retrying...")
+                print("Retrying 1...")
             else:
                 break
 
@@ -359,36 +403,69 @@ class MainWindow(QtGui.QMainWindow):
     def calculate_row_profile(self):
         x_integration_limits = self.x_int_lims
         im_data = self.im_data
-        return np.sum(im_data[x_integration_limits[0]:x_integration_limits[1],::], axis=0)
+        integral = np.sum(im_data[x_integration_limits[0]:x_integration_limits[1],::], axis=0)
+        length = x_integration_limits[1] - x_integration_limits[0]
+        normalized = integral / length
+        return normalized
 
     def updateRowprofile(self):
         rp = self.calculate_row_profile()
+        self.rp_data = rp
         self.rp_curve.setData(x=rp, y=self.rows_array)
         if self.gaussian:
-            x_fit = gaussian_fit(self.rows_array, rp)
+            #x_fit = gaussian_fit(self.rows_array, rp)
             #print("Row Mean: ", x_fit[2][0])
-            if not x_fit[1]: # not estimate
-                self.rp_gaussian.setPen(qualitative_colors[0])
+            if not self.fit_roi_only:
+                x_fit = gaussian_fit(self.rows_array, rp)
+                if not x_fit[1]: # not estimate
+                    self.rp_gaussian.setPen(qualitative_colors[0])
+                else:
+                    self.rp_gaussian.setPen(grey)
+                self.rp_gaussian.setData(x=x_fit[0], y=self.rows_array)
             else:
-                self.rp_gaussian.setPen(grey)
-            self.rp_gaussian.setData(x=x_fit[0], y=self.rows_array)
+                y0 = self.y_int_lims[0]
+                y1 = self.y_int_lims[1]
+                x_fit = gaussian_fit(self.rows_array[y0:y1], rp[y0:y1])
+                if not x_fit[1]: # not estimate
+                    self.rp_gaussian.setPen(qualitative_colors[0])
+                else:
+                    self.rp_gaussian.setPen(grey)
+                self.rp_gaussian.setData(x=x_fit[0], y=self.rows_array[y0:y1])
+            #self.rp_gaussian.setData(x=x_fit[0], y=self.rows_array)
+            self.scwin.feedData(np.array([x_fit[2][0], x_fit[2][1]]), data_slice=[2,4])
 
     def calculate_col_profile(self):
         y_integration_limits = self.y_int_lims
         im_data = self.im_data
-        return np.sum(im_data[::,y_integration_limits[0]:y_integration_limits[1]], axis=1)
+        integral = np.sum(im_data[::,y_integration_limits[0]:y_integration_limits[1]], axis=1)
+        length = y_integration_limits[1] - y_integration_limits[0]
+        normalized = integral / length
+        return normalized
 
     def updateColprofile(self):
         cp = self.calculate_col_profile()
+        self.cp_data = cp
         self.cp_curve.setData(y=cp)
         if self.gaussian:
-            y_fit = gaussian_fit(self.cols_array, cp)
-            print("Col Mean: ", y_fit[2][0])
-            if not y_fit[1]: # not estimate
-                self.cp_gaussian.setPen(qualitative_colors[0])
+            #y_fit = gaussian_fit(self.cols_array, cp)
+            if not self.fit_roi_only:
+                y_fit = gaussian_fit(self.cols_array, cp)
+                if not y_fit[1]: # not estimate
+                    self.cp_gaussian.setPen(qualitative_colors[0])
+                else:
+                    self.cp_gaussian.setPen(grey)
+                self.cp_gaussian.setData(y=y_fit[0])
             else:
-                self.cp_gaussian.setPen(grey)
-            self.cp_gaussian.setData(y=y_fit[0])
+                x0 = self.x_int_lims[0]
+                x1 = self.x_int_lims[1]
+                y_fit = gaussian_fit(self.cols_array[x0:x1], cp[x0:x1])
+                if not y_fit[1]: # not estimate
+                    self.cp_gaussian.setPen(qualitative_colors[0])
+                else:
+                    self.cp_gaussian.setPen(grey)
+                self.cp_gaussian.setData(x=self.cols_array[x0:x1], y=y_fit[0])
+            #self.cp_gaussian.setData(y=y_fit[0])
+            self.scwin.feedData(np.array([y_fit[2][0], y_fit[2][1]]), data_slice=[0,2], count=False)
 
     def toggle_capture(self):
         #TODO: Write a method that toggles the capture and processing of images.
@@ -402,6 +479,200 @@ class MainWindow(QtGui.QMainWindow):
 
         self.capturing = not self.capturing
 
+    def _dump_data(self):
+        """Stores current data with timestampt in subdirectory.
+
+        """
+        data = {}
+        # add image array
+        data["im_array"] = self.im_data
+
+        # add row and column profiles
+        data["row_profile"] = self.rp_data
+        data["col_profile"] = self.cp_data
+
+        # add region of interest info
+        roi_pos = self.roi.pos()
+        data["roi_pos"] = np.array([roi_pos.x(), roi_pos.y()])
+        roi_size = self.roi.size()
+        data["roi_size"] = np.array([roi_size.x(), roi_size.y()])
+        
+        data_root = "./data"
+        if not os.path.exists(data_root):
+            os.makedirs(data_root)
+
+        timestamp = time.time()
+        st = datetime.datetime.fromtimestamp(timestamp).strftime('_%Y_%m_%d_%H_%M_%S')
+
+        for name in data.keys():
+            arr = data[name]
+            filename = data_root + '/' + name + st
+            np.save(filename, arr)
+
+class ScrollWindow(QtGui.QMainWindow):
+
+    x = np.arange(100) # static x axis, store 200 points for every parameter
+
+    def __init__(self, parent=None):
+        """TODO: to be defined1. """
+        super(ScrollWindow, self).__init__(parent)
+        
+        # initialize the window 
+        win = pg.GraphicsWindow()
+        win.resize(1000,600)
+        self.setCentralWidget = win
+        self.win = win
+
+        # initialize two plots to show the evolution of e.g.
+        # mean and stdev of row and column fits
+        lineplots = []
+        title = ["Column fit", "Row fit"]
+        for i in range(2):
+            p_mean = win.addPlot(title="{0} Mean".format(title[i]))
+            p_std = win.addPlot(title="{0} Standard Deviation".format(title[i]))
+            for p in [p_mean, p_std]:
+                p.setDownsampling(mode='peak')
+                p.setClipToView(True)
+                p.setLimits(xMax=max(self.x))
+                p.addLegend()
+            pen0 = pg.mkPen(qualitative_colors[0], width=3)
+            pen1 = pg.mkPen(qualitative_colors[1], width=3)
+            l0 = p_mean.plot(pen=pen0, name='Mean')
+            l1 = p_std.plot(pen=pen1, name='Standard deviation')
+            lineplots.append(l0)
+            lineplots.append(l1)
+
+            win.nextRow()
+
+        self.lineplots = lineplots
+
+        # describe how the plotted parameters behave, i.e. how many they are
+        # and initialize structure to store them
+        self.n_pars = 4
+        data_array = np.zeros((self.n_pars, len(self.x)))
+        self.data_array = data_array
+        self.feed_count = 0
+
+    def feedData(self, data_chunk, data_slice, count=True):
+        """Feeds a new chunk of data to the data array.
+        The chunk is pushed into data_array.
+
+        :data_chunk: np.ndarray of length n_pars
+
+        """
+        if self.feed_count < len(self.x) and count:
+            self.feed_count += 1
+        n0 = data_slice[0]
+        n1 = data_slice[1]
+        data_array = self.data_array
+        data_array[n0:n1] = np.roll(data_array[n0:n1], shift=-1, axis=1)
+        data_array[n0:n1, -1] = data_chunk
+        self.data_array = data_array
+
+    def updatePlot(self):
+        indx_feed_count = len(self.x) - self.feed_count
+        for i, l in enumerate(self.lineplots):
+            l.setData(x=self.x[:self.feed_count], y=self.data_array[i, indx_feed_count:])
+
+class MainWindow(QtGui.QMainWindow):
+
+    """The MainWindow should contain a dialog from which one
+    can choose which camera stream to start. The camera object will 
+    then be passed to a CameraWindow for display."""
+
+    acquisition_timer_interval = 1000
+    def __init__(self, parent=None):
+        """Initialize the main window and its dialog. """
+
+        super(MainWindow, self).__init__(parent)
+        
+        self.setWindowTitle("Launch control center")
+        # initialize the gige bus to manage the cameras
+        self.bus, serial_nums = self.init_gige_bus()
+
+        # create a dropdown menu for camera selection
+        comboBox = QtGui.QComboBox(self)
+        for serial in serial_nums:
+            comboBox.addItem(str(serial))
+        comboBox.move(40, 10)
+        self.comboBox = comboBox
+
+        # create a button to start stream
+        startButton = QtGui.QPushButton("Start stream", self)
+        startButton.clicked.connect(self.start_stream)
+        startButton.move(40, 50)
+        self.camera_windows = []
+
+
+    def init_gige_bus(self):
+        """Initializes a GigE bus interface and finds all attached cameras.
+        :returns: pc2.BusManager
+
+        """
+        bus = pc2.BusManager()
+        # test code
+        cams=bus.discoverGigECameras(10)
+        print(cams)
+        # end test code
+        bus.forceAllIPAddressesAutomatically()
+        n_cams = bus.getNumOfCameras()
+        serial_nums = []
+        for i in range(n_cams):
+            serial_nums.append(bus.getCameraSerialNumberFromIndex(i))
+        return bus, serial_nums
+
+    def initialize_cam(self, serial):
+        """
+        Initializes a camera for a given serial number and bus.
+        The bus should be initialized first.
+        :returns: GigECamera object
+        """
+        # sometimes the cam has a hard time starting. We catch some
+        # exceptions and just try again.
+        for i in range(20):
+            cam = pc2.GigECamera()
+            try:
+                cam.connect(self.bus.getCameraFromSerialNumber(serial))
+                print("connected:")
+                # set up camera for GigE use
+                gigeconf = cam.getGigEConfig()
+                gigeconf.enablePacketResend = True
+                cam.setGigEConfig(gigeconf)
+
+                # set up configuration of camera
+                conf = cam.getConfiguration()
+                conf.numBuffers = 4
+                conf.grabTimeout = self.acquisition_timer_interval
+                conf.grabMode = 1 # BUFFER_FRAMES grab mode, see docs
+                cam.setConfiguration(conf)
+                
+                # start streaming
+                cam.startCapture()
+                print("Started stream for cam {0}".format(serial))
+                return cam
+
+            except pc2.Fc2error as e:
+                try:
+                    cam.disconnect()
+                except:
+                    pass
+
+                del cam
+                print(e)
+                print("Retrying 2...")
+            else:
+                break
+            time.sleep(.1)
+        print("No connection to camera established.")
+
+    def start_stream(self):
+        serial = int(self.comboBox.currentText())
+        cam = self.initialize_cam(serial)
+        if cam is not None:
+            camWin = CameraWindow(cam=cam, parent=self, serial=serial)
+            camWin.show()
+            self.camera_windows.append(camWin)
+
 def main():
     logging.basicConfig(filename='beamprofiler.log',
                                 filemode='w',
@@ -410,6 +681,7 @@ def main():
                                 level=logging.DEBUG)
     logging.info('Started.')
     app = QtGui.QApplication(sys.argv)
+    #window = CameraWindow()
     window = MainWindow()
     window.show()
     app.exec_()
