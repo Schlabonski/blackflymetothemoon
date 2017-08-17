@@ -9,6 +9,7 @@ import logging
 import PyCapture2 as pc2
 import numpy as np
 from PyQt5 import QtGui, QtCore
+from PyQt5.QtCore import Qt
 import pyqtgraph as pg
 from pyqtgraph.dockarea import  DockArea, Dock
 
@@ -53,6 +54,7 @@ class CameraWindow(QtGui.QMainWindow):
         self.gaussian_inited = False
         self.acquisition_inited = False
         self.substract_background = False
+        self.adapt_levels_boolean = False
         self.fit_roi_only = True
 
 	## Initialize cam
@@ -143,6 +145,7 @@ class CameraWindow(QtGui.QMainWindow):
         self._add_background_save_btn()
         self._add_background_substraction_checkbox()
         self._add_dump_data_btn()
+        self._add_image_level_dialogue()
 
         # create a popup window that shows the results of the gauss fit in
         # a scroll plot
@@ -215,7 +218,7 @@ class CameraWindow(QtGui.QMainWindow):
         self.btn_layout.addWidget(chbox)
         self.btn_layout.nextRow()
         chbox.stateChanged.connect(self._toggle_substraction)
-        self.chbox_susbtract_background = chbox
+        self.chbox_substract_background = chbox
 
     def _add_dump_data_btn(self):
         btn = QtGui.QPushButton('Save data')
@@ -223,6 +226,86 @@ class CameraWindow(QtGui.QMainWindow):
         self.btn_layout.nextRow()
         btn.clicked.connect(self._dump_data)
         self.btn_dump_data = btn
+
+    def _add_image_level_dialogue(self):
+        """
+        Adds a checkbox and two sliders two control the black and white level
+        of the image.
+
+        :return: None
+        """
+        # add a checkbox to toggle automatic level setting
+        # add a layout for the checkbox. This Layout will have three components
+        # The Checkbox itseld and the two boundaries
+
+        # The Checkbox
+        chbox_layout = self.btn_layout.addLayout()
+        self.btn_layout.nextRow()
+        chbox = QtGui.QCheckBox('User custom image levels with Range')
+        chbox_layout.addWidget(chbox)
+        chbox_layout.nextCol()
+        chbox.stateChanged.connect(self._toggle_adapt_levels)
+        self.chbox_adapt_levels = chbox
+
+        # Lower Boundary
+        self.label_black = QtGui.QLabel('0')
+        chbox_layout.addWidget(self.label_black)
+        chbox_layout.nextCol()
+
+        # Upper Boundary
+        self.label_white = QtGui.QLabel('255')
+        chbox_layout.addWidget(self.label_white)
+
+        # add a slider that regulates the black value
+        # The new Layer consists of three parts
+        # The lower Boundary, the slider and the upper boundary
+
+        # Layout and lower boundary
+        sl_min_layout = self.btn_layout.addLayout()
+        self.btn_layout.nextRow()
+        self.label_min_1 = QtGui.QLabel('0')
+        sl_min_layout.addWidget(self.label_min_1)
+        sl_min_layout.nextCol()
+
+        # The slider
+        lvl_sl_min = QtGui.QSlider(Qt.Horizontal)
+        lvl_sl_min.setMinimum(0)
+        lvl_sl_min.setMaximum(255)
+        lvl_sl_min.setValue(0)
+        lvl_sl_min.valueChanged.connect(self._adapt_levels)
+        self.lvl_sl_min = lvl_sl_min
+        sl_min_layout.addWidget(lvl_sl_min)
+        sl_min_layout.nextCol()
+
+        # The upper boundary
+        self.label_max_1 = QtGui.QLabel('255')
+        sl_min_layout.addWidget(self.label_max_1)
+
+        # add a slider to control white level
+        # The new Layer consists of three parts
+        # The lower Boundary, the slider and the upper boundary
+
+        # Layout and lower boundary
+        sl_max_layout = self.btn_layout.addLayout()
+        self.btn_layout.nextRow()
+        self.label_min_2 = QtGui.QLabel('0')
+        sl_max_layout.addWidget(self.label_min_2)
+        sl_max_layout.nextCol()
+
+        # The slider
+        lvl_sl_max = QtGui.QSlider(Qt.Horizontal)
+        lvl_sl_max.setMinimum(0)
+        lvl_sl_max.setMaximum(255)
+        lvl_sl_max.setValue(255)
+        lvl_sl_max.valueChanged.connect(self._adapt_levels)
+        self.lvl_sl_max = lvl_sl_max
+        sl_max_layout.addWidget(lvl_sl_max)
+        sl_max_layout.nextCol()
+
+        # Upper boundary
+        self.label_max_2 = QtGui.QLabel('255')
+        sl_max_layout.addWidget(self.label_max_2)
+
 
     def _save_background(self):
         """Saves the current im_data to a .npy file for substraction.
@@ -239,6 +322,28 @@ class CameraWindow(QtGui.QMainWindow):
 
         else:
             self.substract_background = False
+
+    def _toggle_adapt_levels(self):
+        """ Toggles between automatic&userdefined black and white values of
+        self.img"""
+        self.adapt_levels_boolean = not self.adapt_levels_boolean
+        if self.adapt_levels_boolean:
+            self._adapt_levels()
+
+    def _adapt_levels(self):
+        """ Adapts the black and white levels of the image. """
+
+        if self.adapt_levels_boolean:
+            # set image levels to slider values
+            self.img.setLevels([self.lvl_sl_min.value(), self.lvl_sl_max.value()])
+
+        # do not allow black level slider to be greater than white level slider
+        self.lvl_sl_max.setMinimum(self.lvl_sl_min.value())
+        self.lvl_sl_min.setMaximum(self.lvl_sl_max.value())
+        self.label_max_1.setText(str(self.lvl_sl_max.value()))
+        self.label_min_2.setText(str(self.lvl_sl_min.value()))
+        self.label_black.setText(str(self.lvl_sl_min.value()))
+        self.label_white.setText(str(self.lvl_sl_max.value()))
 
     def toggle_gaussian(self):
         self.gaussian = not self.gaussian
@@ -388,7 +493,10 @@ class CameraWindow(QtGui.QMainWindow):
     def updateImage(self):
         im_data = self.get_image()
         self.im_data = im_data
-        self.img.setImage(im_data)
+        self.img.setImage(im_data, autoLevels=not self.adapt_levels_boolean)
+        if not self.adapt_levels_boolean:
+            self.label_black.setText(str(self.img.levels[0]))
+            self.label_white.setText(str(self.img.levels[1]))
 
     def update_roi(self):
         x_integration_limits = self.x_int_lims
